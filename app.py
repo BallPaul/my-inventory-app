@@ -7,8 +7,8 @@ from pyzbar.pyzbar import decode
 from datetime import datetime
 import pytz
 
-st.set_page_config(page_title="雲端鏡頭庫存系統-連續盤點時間版", layout="centered")
-st.title("📱 雲端連續掃碼盤點系統 (含時間戳)")
+st.set_page_config(page_title="雲端鏡頭庫存系統-倉位盤點版", layout="centered")
+st.title("📱 雲端連續掃碼盤點系統")
 
 # 使用 Streamlit 官方最穩定的免檔案連線方式
 @st.cache_resource
@@ -30,6 +30,8 @@ if "total_count" not in st.session_state:
     st.session_state.total_count = 0       # 累計數量
 if "product_name" not in st.session_state:
     st.session_state.product_name = ""     # 商品名稱
+if "location_name" not in st.session_state:
+    st.session_state.location_name = ""   # 儲存位置
 
 # 1. 條碼影相區域
 st.subheader("第一步：連續影相盤點")
@@ -64,25 +66,26 @@ if st.button("清空目前盤點計數 🔄"):
     st.session_state.current_barcode = ""
     st.session_state.total_count = 0
     st.session_state.product_name = ""
-    st.experimental_rerun()
+    st.session_state.location_name = ""
+    st.rerun()
 
-# 2. 商品名稱輸入與上傳
+# 2. 商品資訊與位置輸入
 st.subheader("第二步：確認資料並同步至雲端")
 st.session_state.product_name = st.text_input("商品名稱", value=st.session_state.product_name)
+st.session_state.location_name = st.text_input("儲存位置 (例如：A區、3號架、Office)", value=st.session_state.location_name)
 
 # 3. 提交入庫按鈕
 if st.button("確認總數並送出入庫 📥", type="primary"):
-    if not st.session_state.current_barcode or not st.session_state.product_name:
-        st.error("❌ 請確保有掃描條碼並填寫商品名稱！")
+    if not st.session_state.current_barcode or not st.session_state.product_name or not st.session_state.location_name:
+        st.error("❌ 請確保有掃描條碼，並填寫商品名稱和儲存位置！")
     elif st.session_state.total_count == 0:
         st.error("❌ 目前累計數量為 0，請先影相盤點！")
     else:
-        with st.spinner("正在將總數同步至 Google 雲端..."):
-            # 🕒 獲取香港/台北時間（避免雲端伺服器用錯外國時間）
+        with st.spinner("正在將總數與位置同步至 Google 雲端..."):
+            # 🕒 獲取香港時間
             local_tz = pytz.timezone('Asia/Hong_Kong')
             now_local = datetime.now(local_tz)
             
-            # 格式化日期和時間（例如：2026-11-09 22:30）
             date_str = now_local.strftime("%Y-%m-%d")
             time_str = now_local.strftime("%H:%M")
             
@@ -91,20 +94,22 @@ if st.button("確認總數並送出入庫 📥", type="primary"):
                 str(st.session_state.current_barcode), 
                 st.session_state.product_name, 
                 int(st.session_state.total_count),
+                st.session_state.location_name,
                 date_str,
                 time_str
             ])
-            st.success(f"🎉 成功！【{st.session_state.product_name}】總共 {st.session_state.total_count} 件已整筆寫入雲端！")
+            st.success(f"🎉 成功！【{st.session_state.product_name}】共 {st.session_state.total_count} 件已成功記錄於【{st.session_state.location_name}】並同步雲端！")
             
-            # 上傳成功後自動清空
+            # 上傳成功後自動清空，準備下一款貨
             st.session_state.current_barcode = ""
             st.session_state.total_count = 0
             st.session_state.product_name = ""
+            st.session_state.location_name = ""
 
 # 4. 實時顯示雲端庫存
 st.subheader("📊 目前雲端最新庫存總覽")
 try:
-    all_records = sheet.get_all_records()
+    all_records = sheet.get_all_records(expected_headers=['商品編號(SKU)', '商品名稱', '數量', '儲存位置', '入庫日期', '入庫時間'])
     if all_records:
         st.dataframe(all_records, use_container_width=True)
 except Exception as e:
