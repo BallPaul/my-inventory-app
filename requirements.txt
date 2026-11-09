@@ -4,3 +4,4 @@ google-auth
 pyzbar
 opencv-python-headless
 numpy
+pytz
