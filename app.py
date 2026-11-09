@@ -108,4 +108,4 @@ try:
     if all_records:
         st.dataframe(all_records, use_container_width=True)
 except Exception as e:
-    pass
+    st.error(f"❌ 無法載入最新庫存總覽，原因：{str(e)}")
