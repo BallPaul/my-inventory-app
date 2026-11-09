@@ -4,9 +4,11 @@ from google.oauth2.service_account import Credentials
 import cv2
 import numpy as np
 from pyzbar.pyzbar import decode
+from datetime import datetime
+import pytz
 
-st.set_page_config(page_title="雲端鏡頭庫存系統-連續盤點版", layout="centered")
-st.title("📱 雲端連續掃碼盤點系統")
+st.set_page_config(page_title="雲端鏡頭庫存系統-連續盤點時間版", layout="centered")
+st.title("📱 雲端連續掃碼盤點系統 (含時間戳)")
 
 # 使用 Streamlit 官方最穩定的免檔案連線方式
 @st.cache_resource
@@ -39,20 +41,17 @@ if img_file is not None:
     
     barcodes = decode(opencv_img)
     if barcodes:
-        new_scanned_code = barcodes[0].data.decode('utf-8')
+        new_scanned_code = barcodes.data.decode('utf-8')
         
         # 判斷是不是同一個 Barcode
         if st.session_state.current_barcode == "":
-            # 第一次掃描，鎖定這個條碼
             st.session_state.current_barcode = new_scanned_code
             st.session_state.total_count = 1
             st.success(f"🎯 鎖定新條碼：{new_scanned_code}，目前數量：1")
         elif st.session_state.current_barcode == new_scanned_code:
-            # 掃描到相同的條碼，自動 Count 加 1
             st.session_state.total_count += 1
             st.success(f"🔄 偵測到相同條碼！目前累計數量：{st.session_state.total_count}")
         else:
-            # 掃描到不一樣的條碼，跳出警告
             st.error(f"⚠️ 警告：剛剛影的條碼 ({new_scanned_code}) 與目前盤點中的條碼 ({st.session_state.current_barcode}) 不相同！數量未增加。")
     else:
         st.warning("📷 未能清晰辨識條碼，請調整距離再影一次。")
@@ -60,7 +59,7 @@ if img_file is not None:
 # 顯示目前的盤點進度
 st.info(f"📊 **目前盤點狀態**：\n* 鎖定條碼: `{st.session_state.current_barcode if st.session_state.current_barcode else '尚未開始'}`\n* 累計總數: `{st.session_state.total_count} 件`")
 
-# 清除/重置按鈕（如果點錯或者要換下一款貨物）
+# 清除/重置按鈕
 if st.button("清空目前盤點計數 🔄"):
     st.session_state.current_barcode = ""
     st.session_state.total_count = 0
@@ -79,15 +78,25 @@ if st.button("確認總數並送出入庫 📥", type="primary"):
         st.error("❌ 目前累計數量為 0，請先影相盤點！")
     else:
         with st.spinner("正在將總數同步至 Google 雲端..."):
-            # 將最後統計出來的「總數」一次過追加到 Google Sheets
+            # 🕒 獲取香港/台北時間（避免雲端伺服器用錯外國時間）
+            local_tz = pytz.timezone('Asia/Hong_Kong')
+            now_local = datetime.now(local_tz)
+            
+            # 格式化日期和時間（例如：2026-11-09 22:30）
+            date_str = now_local.strftime("%Y-%m-%d")
+            time_str = now_local.strftime("%H:%M")
+            
+            # 將新資料追加到 Google Sheets（最後加上了日期和時間欄位）
             sheet.append_row([
                 str(st.session_state.current_barcode), 
                 st.session_state.product_name, 
-                int(st.session_state.total_count)
+                int(st.session_state.total_count),
+                date_str,
+                time_str
             ])
             st.success(f"🎉 成功！【{st.session_state.product_name}】總共 {st.session_state.total_count} 件已整筆寫入雲端！")
             
-            # 上傳成功後自動清空，準備下一款貨
+            # 上傳成功後自動清空
             st.session_state.current_barcode = ""
             st.session_state.total_count = 0
             st.session_state.product_name = ""
