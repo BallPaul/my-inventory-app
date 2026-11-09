@@ -32,7 +32,7 @@ if img_file is not None:
     
     barcodes = decode(opencv_img)
     if barcodes:
-        scanned_code = barcodes.data.decode('utf-8')
+        scanned_code = barcodes[0].data.decode('utf-8')
         st.success(f"✨ 成功辨識條碼：{scanned_code}")
     else:
         st.warning("📷 已拍照，但未能辨識到清晰的條碼，請調整距離或光線再試一次。")
