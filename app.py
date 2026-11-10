@@ -31,32 +31,39 @@ if "total_count" not in st.session_state:
 if "product_name" not in st.session_state:
     st.session_state.product_name = ""     # 商品名稱
 if "location_name" not in st.session_state:
-    st.session_state.location_name = ""   # 儲存位置
+    st.session_state.location_name = ""    # 儲存位置
+if "last_image_id" not in st.session_state:
+    st.session_state.last_image_id = None  # 💥 照片安全鎖：記錄上一張照片的識別 ID
 
 # 1. 條碼影相區域
 st.subheader("第一步：連續影相盤點")
 img_file = st.camera_input("請對準商品條碼拍照（可連續影相累加）")
 
 if img_file is not None:
-    file_bytes = np.asarray(bytearray(img_file.read()), dtype=np.uint8)
-    opencv_img = cv2.imdecode(file_bytes, 1)
-    
-    barcodes = decode(opencv_img)
-    if barcodes:
-        new_scanned_code = barcodes[0].data.decode('utf-8')
+    # 💥 檢查這張照片是不是剛剛已經辨識過了（對比照片的唯一 ID）
+    if img_file.id != st.session_state.last_image_id:
+        file_bytes = np.asarray(bytearray(img_file.read()), dtype=np.uint8)
+        opencv_img = cv2.imdecode(file_bytes, 1)
         
-        # 判斷是不是同一個 Barcode
-        if st.session_state.current_barcode == "":
-            st.session_state.current_barcode = new_scanned_code
-            st.session_state.total_count = 1
-            st.success(f"🎯 鎖定新條碼：{new_scanned_code}，目前數量：1")
-        elif st.session_state.current_barcode == new_scanned_code:
-            st.session_state.total_count += 1
-            st.success(f"🔄 偵測到相同條碼！目前累計數量：{st.session_state.total_count}")
+        barcodes = decode(opencv_img)
+        if barcodes:
+            new_scanned_code = barcodes[0].data.decode('utf-8')
+            
+            # 判斷是不是同一個 Barcode
+            if st.session_state.current_barcode == "":
+                st.session_state.current_barcode = new_scanned_code
+                st.session_state.total_count = 1
+                st.success(f"🎯 鎖定新條碼：{new_scanned_code}，目前數量：1")
+            elif st.session_state.current_barcode == new_scanned_code:
+                st.session_state.total_count += 1
+                st.success(f"🔄 偵測到相同條碼！目前累計數量：{st.session_state.total_count}")
+            else:
+                st.error(f"⚠️ 警告：剛剛影的條碼 ({new_scanned_code}) 與目前盤點中的條碼 ({st.session_state.current_barcode}) 不相同！數量未增加。")
         else:
-            st.error(f"⚠️ 警告：剛剛影的條碼 ({new_scanned_code}) 與目前盤點中的條碼 ({st.session_state.current_barcode}) 不相同！數量未增加。")
-    else:
-        st.warning("📷 未能清晰辨識條碼，請調整距離再影一次。")
+            st.warning("📷 未能清晰辨識條碼，請調整距離再影一次。")
+        
+        # 💥 辨識完畢後，立刻把這張照片的 ID 鎖定，防止打字刷新時重複觸發
+        st.session_state.last_image_id = img_file.id
 
 # 顯示目前的盤點進度
 st.info(f"📊 **目前盤點狀態**：\n* 鎖定條碼: `{st.session_state.current_barcode if st.session_state.current_barcode else '尚未開始'}`\n* 累計總數: `{st.session_state.total_count} 件`")
@@ -67,6 +74,7 @@ if st.button("清空目前盤點計數 🔄"):
     st.session_state.total_count = 0
     st.session_state.product_name = ""
     st.session_state.location_name = ""
+    st.session_state.last_image_id = None
     st.rerun()
 
 # 2. 商品資訊與位置輸入
@@ -82,14 +90,12 @@ if st.button("確認總數並送出入庫 📥", type="primary"):
         st.error("❌ 目前累計數量為 0，請先影相盤點！")
     else:
         with st.spinner("正在將總數與位置同步至 Google 雲端..."):
-            # 🕒 獲取香港時間
             local_tz = pytz.timezone('Asia/Hong_Kong')
             now_local = datetime.now(local_tz)
             
             date_str = now_local.strftime("%Y-%m-%d")
             time_str = now_local.strftime("%H:%M")
             
-            # 將新資料追加到 Google Sheets（最後加上了日期和時間欄位）
             sheet.append_row([
                 str(st.session_state.current_barcode), 
                 st.session_state.product_name, 
@@ -98,13 +104,14 @@ if st.button("確認總數並送出入庫 📥", type="primary"):
                 date_str,
                 time_str
             ])
-            st.success(f"🎉 成功！【{st.session_state.product_name}】共 {st.session_state.total_count} 件已成功記錄於【{st.session_state.location_name}】並同步雲端！")
+            st.success(f"🎉 成功！【{st.session_state.product_name}】共 {st.session_state.total_count} 件已成功記錄並同步雲端！")
             
-            # 上傳成功後自動清空，準備下一款貨
+            # 上傳成功後自動清空
             st.session_state.current_barcode = ""
             st.session_state.total_count = 0
             st.session_state.product_name = ""
             st.session_state.location_name = ""
+            st.session_state.last_image_id = None
 
 # 4. 實時顯示雲端庫存
 st.subheader("📊 目前雲端最新庫存總覽")
