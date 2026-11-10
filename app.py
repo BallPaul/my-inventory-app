@@ -7,7 +7,7 @@ from pyzbar.pyzbar import decode
 from datetime import datetime
 import pytz
 
-st.set_page_config(page_title="雲端鏡頭庫存系統-尺寸選單版", layout="centered")
+st.set_page_config(page_title="雲端鏡頭庫存系統-尺寸倉位版", layout="centered")
 st.title("📱 雲端連續掃碼盤點系統")
 
 # 連接 Google Sheets 雲端資料庫
@@ -44,7 +44,7 @@ if "product_name" not in st.session_state:
 if "location_name" not in st.session_state:
     st.session_state.location_name = ""    
 if "size_name" not in st.session_state:
-    st.session_state.size_name = "M"       # 預設為 M
+    st.session_state.size_name = "M"       
 if "last_detected_barcode" not in st.session_state:
     st.session_state.last_detected_barcode = "" 
 
@@ -58,7 +58,7 @@ if img_file is not None:
     
     barcodes = decode(opencv_img)
     if barcodes:
-        st.session_state.last_detected_barcode = barcodes[0].data.decode('utf-8')
+        st.session_state.last_detected_barcode = barcodes.data.decode('utf-8')
         st.success(f"📷 偵測到條碼：{st.session_state.last_detected_barcode}（請點擊下方按鈕計數）")
     else:
         st.session_state.last_detected_barcode = ""
@@ -110,11 +110,9 @@ if st.button("清空目前盤點計數 🔄"):
 st.subheader("第二步：確認資料並同步至雲端")
 st.session_state.product_name = st.text_input("商品名稱", value=st.session_state.product_name)
 
-# 💥 核心優化：將尺寸改為快速下拉選單
+# 尺寸快速下拉選單
 size_options = ["SS", "S", "M", "L", "XL", "XXL", "手動輸入其他尺寸..."]
-# 確保原本儲存的尺寸如果在選項中，能正確對齊索引
 default_idx = size_options.index(st.session_state.size_name) if st.session_state.size_name in size_options else 2
-
 selected_size = st.selectbox("商品尺寸 (Size)", options=size_options, index=default_idx)
 
 if selected_size == "手動輸入其他尺寸...":
@@ -124,7 +122,7 @@ else:
 
 st.session_state.location_name = st.text_input("儲存位置 (例如：A區、3號架、Office)", value=st.session_state.location_name)
 
-# 3. 提交入庫按鈕
+# 3. 提交入庫按鈕 (配合你現有的 Google Sheets 欄位順序)
 if st.button("確認總數並送出入庫 📥", type="primary"):
     if not st.session_state.current_barcode or not st.session_state.product_name or not st.session_state.location_name or not st.session_state.size_name:
         st.error("❌ 請確保有條碼、品名、尺寸和儲存位置！")
@@ -150,15 +148,15 @@ if st.button("確認總數並送出入庫 📥", type="primary"):
             except Exception:
                 pass
             
-            # 2. 庫存智能整合邏輯（精準比對 SKU + 尺寸 + 儲存位置 三個欄位）
+            # 2. 🛠️ 智能整合邏輯（配合你相片中的順序：1=SKU, 2=品名, 3=數量, 4=尺寸, 5=位置）
             all_rows = inventory_sheet.get_all_values()
             match_row_index = None
             
             for idx, row in enumerate(all_rows[1:], start=2):
                 if len(row) >= 5:
-                    sheet_sku = str(row[0]).strip()
-                    sheet_size = str(row[2]).strip()       # Excel 的第 3 欄
-                    sheet_location = str(row[3]).strip()   # Excel 的第 4 欄
+                    sheet_sku = str(row[0]).strip()       # 第 1 欄 SKU
+                    sheet_size = str(row[3]).strip()      # 第 4 欄 尺寸
+                    sheet_location = str(row[4]).strip()  # 第 5 欄 位置
                     
                     current_sku = str(st.session_state.current_barcode).strip()
                     current_size = str(st.session_state.size_name).strip()
@@ -170,27 +168,29 @@ if st.button("確認總數並送出入庫 📥", type="primary"):
             
             if match_row_index:
                 try:
-                    old_qty = int(all_rows[match_row_index-1][1]) 
+                    old_qty = int(all_rows[match_row_index-1][2]) # 舊數量在第 3 欄
                 except (ValueError, IndexError):
                     old_qty = 0
                     
                 new_qty = old_qty + int(st.session_state.total_count)
                 
-                inventory_sheet.update_cell(match_row_index, 2, new_qty)                      
-                inventory_sheet.update_cell(match_row_index, 5, date_str)                     
-                inventory_sheet.update_cell(match_row_index, 6, time_str)                     
-                st.success(f"🔄 雲端已存在完全符合的紀錄！已將【{st.session_state.size_name}】的數量累加為 **{new_qty}** 件！")
+                inventory_sheet.update_cell(match_row_index, 2, st.session_state.product_name) # 更新品名 (第2欄)
+                inventory_sheet.update_cell(match_row_index, 3, new_qty)                      # 更新數量 (第3欄)
+                inventory_sheet.update_cell(match_row_index, 6, date_str)                     # 更新日期 (第6欄)
+                inventory_sheet.update_cell(match_row_index, 7, time_str)                     # 更新時間 (第7欄)
+                st.success(f"🔄 雲端已存在相同紀錄！已將數量累加更新為 **{new_qty}** 件！")
             else:
+                # 🛠️ 嚴格對齊你的 Excel 標題順序寫入數據
                 inventory_sheet.append_row([
-                    str(st.session_state.current_barcode), 
-                    str(st.session_state.total_count),
-                    str(st.session_state.product_name), 
-                    str(st.session_state.size_name),
-                    st.session_state.location_name,
-                    date_str,
-                    time_str
+                    str(st.session_state.current_barcode),  # A: 商品編號(SKU)
+                    str(st.session_state.product_name),     # B: 商品名稱
+                    int(st.session_state.total_count),      # C: 數量
+                    str(st.session_state.size_name),        # D: 尺寸
+                    str(st.session_state.location_name),    # E: 儲存位置
+                    date_str,                               # F: 入庫日期
+                    time_str                                # G: 入庫時間
                 ])
-                st.success(f"🎉 成功！新規格【{st.session_state.product_name} - {st.session_state.size_name}】已同步至雲端！")
+                st.success(f"🎉 成功！新商品規格已完美寫入對應的 Excel 欄位！")
             
             # 上傳成功後自動清空
             st.session_state.current_barcode = ""
@@ -204,7 +204,8 @@ if st.button("確認總數並送出入庫 📥", type="primary"):
 # 4. 實時顯示雲端庫存
 st.subheader("📊 目前雲端最新庫存總覽")
 try:
-    all_records = inventory_sheet.get_all_records(expected_headers=['商品編號(SKU)', '數量', '商品名稱', '儲存位置', '入庫日期', '入庫時間'])
+    # 完美對齊你相片中的這 7 個標題順序讀取
+    all_records = inventory_sheet.get_all_records(expected_headers=['商品編號(SKU)', '商品名稱', '數量', '尺寸', '儲存位置', '入庫日期', '入庫時間'])
     if all_records:
         st.dataframe(all_records, use_container_width=True)
 except Exception as e:
