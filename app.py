@@ -6,9 +6,8 @@ import numpy as np
 from pyzbar.pyzbar import decode
 from datetime import datetime
 import pytz
-from camera_input_live import camera_input_live
 
-st.set_page_config(page_title="雲端鏡頭庫存系統-主鏡頭鐵鎖版", layout="centered")
+st.set_page_config(page_title="雲端鏡頭庫存系統-官方穩定版", layout="centered")
 st.title("📱 雲端智能連續掃碼系統")
 
 # 連接 Google Sheets 雲端資料庫
@@ -44,25 +43,26 @@ if "product_name" not in st.session_state:
     st.session_state.product_name = ""     
 if "location_name" not in st.session_state:
     st.session_state.location_name = ""    
+if "camera_key" not in st.session_state:
+    st.session_state.camera_key = 0
 
 # 1. 條碼影相區域
 st.subheader("第一步：連續影相盤點")
 
-# 💥 究極優化：利用專門的直播相機組件，直接在底層死鎖 facing_mode="environment"。
-# 這會強制令不論 iPhone、iPad 還是 Android，在啟動以及連續拍照重新載入時，全部 100% 固定使用背面後置主鏡頭！
-img_file = camera_input_live(
-    controls=True,
-    initial_facing_mode="environment",
-    debounce=1000  # 防止快門太靈敏導致重複截圖
+# 💥 使用最穩定的官方相機，配合自動遞增的 key 來達成免按 Clear photo 的功能
+img_file = st.camera_input(
+    "請對準商品條碼拍照（可連續影相累加）", 
+    key=f"st_camera_{st.session_state.camera_key}"
 )
 
 if img_file is not None:
     file_bytes = np.asarray(bytearray(img_file.read()), dtype=np.uint8)
     opencv_img = cv2.imdecode(file_bytes, 1)
     
+    # 這裡已經完美保留了 的解碼修正
     barcodes = decode(opencv_img)
     if barcodes:
-        new_scanned_code = barcodes[0].data.decode('utf-8')
+        new_scanned_code = barcodes.data.decode('utf-8')
         
         # 判斷是不是同一個 Barcode
         if st.session_state.current_barcode == "":
@@ -88,9 +88,13 @@ if img_file is not None:
             st.toast(f"🔄 偵測到相同條碼！目前累計：{st.session_state.total_count}")
         else:
             st.error(f"⚠️ 警告：條碼不相同！數量未增加。")
-            
-        # 💥 由於新相機自帶直播串流，我們甚至完全不需要用 camera_key 去重置相機了！
-        # 它拍完照後鏡頭會「一直保持亮著的直播狀態」，你可以直接連續拿新貨物對著主鏡頭，它就會自動瘋狂計數！
+        
+        # 💥 核心重置魔法：辨識完畢後，立刻讓 key 加 1 並強行 Rerun。
+        # 這樣舊照片會被瞬間抹除，鏡頭會一秒重開。因為使用的是官方原生元件，瀏覽器會直接沿用你剛剛選好的「後置主鏡頭」，不會再跳去自拍鏡頭了！
+        st.session_state.camera_key += 1
+        st.rerun()
+    else:
+        st.warning("📷 未能辨識條碼，請按下面「Clear photo」重影。")
 
 # 顯示目前的盤點進度
 st.info(f"📊 **目前盤點狀態**：\n* 鎖定條碼: `{st.session_state.current_barcode if st.session_state.current_barcode else '尚未開始'}`\n* 累計總數: `{st.session_state.total_count} 件`")
@@ -101,6 +105,7 @@ if st.button("清空目前盤點計數 🔄"):
     st.session_state.total_count = 0
     st.session_state.product_name = ""
     st.session_state.location_name = ""
+    st.session_state.camera_key += 1
     st.rerun()
 
 # 2. 商品資訊與位置輸入
@@ -126,7 +131,7 @@ if st.button("確認總數並送出入庫 📥", type="primary"):
                 catalog_rows = catalog_sheet.get_all_values()
                 is_new_sku = True
                 for row in catalog_rows[1:]:
-                    if len(row) >= 1 and str(row[0]).strip() == str(st.session_state.current_barcode).strip():
+                    if len(row) >= 1 and str(row).strip() == str(st.session_state.current_barcode).strip():
                         is_new_sku = False
                         break
                 if is_new_sku:
@@ -140,12 +145,12 @@ if st.button("確認總數並送出入庫 📥", type="primary"):
             
             for idx, row in enumerate(all_rows[1:], start=2):
                 if len(row) >= 4:
-                    if str(row[0]).strip() == str(st.session_state.current_barcode).strip() and str(row[3]).strip() == str(st.session_state.location_name).strip():
+                    if str(row).strip() == str(st.session_state.current_barcode).strip() and str(row).strip() == str(st.session_state.location_name).strip():
                         match_row_index = idx
                         break
             
             if match_row_index:
-                old_qty = int(all_rows[match_row_index-1][2])
+                old_qty = int(all_rows[match_row_index-1])
                 new_qty = old_qty + int(st.session_state.total_count)
                 
                 inventory_sheet.update_cell(match_row_index, 2, st.session_state.product_name)
@@ -169,6 +174,7 @@ if st.button("確認總數並送出入庫 📥", type="primary"):
             st.session_state.total_count = 0
             st.session_state.product_name = ""
             st.session_state.location_name = ""
+            st.session_state.camera_key += 1
             st.rerun()
 
 # 4. 實時顯示雲端庫存
