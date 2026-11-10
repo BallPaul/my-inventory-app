@@ -58,7 +58,7 @@ if img_file is not None:
     
     barcodes = decode(opencv_img)
     if barcodes:
-        st.session_state.last_detected_barcode = barcodes.data[0].decode('utf-8')
+        st.session_state.last_detected_barcode = barcodes[0].data.decode('utf-8')
         st.success(f"📷 偵測到條碼：{st.session_state.last_detected_barcode}（請點擊下方按鈕計數）")
     else:
         st.session_state.last_detected_barcode = ""
