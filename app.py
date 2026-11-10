@@ -62,7 +62,7 @@ if img_file is not None:
     # 這裡已經完美保留了 的解碼修正
     barcodes = decode(opencv_img)
     if barcodes:
-        new_scanned_code = barcodes.data.decode('utf-8')
+        new_scanned_code = barcodes[0].data.decode('utf-8')
         
         # 判斷是不是同一個 Barcode
         if st.session_state.current_barcode == "":
