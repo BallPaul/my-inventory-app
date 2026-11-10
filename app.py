@@ -7,7 +7,7 @@ from pyzbar.pyzbar import decode
 from datetime import datetime
 import pytz
 
-st.set_page_config(page_title="雲端鏡頭庫存系統-主鏡頭固定版", layout="centered")
+st.set_page_config(page_title="雲端鏡頭庫存系統-尺寸選單版", layout="centered")
 st.title("📱 雲端連續掃碼盤點系統")
 
 # 連接 Google Sheets 雲端資料庫
@@ -43,6 +43,8 @@ if "product_name" not in st.session_state:
     st.session_state.product_name = ""     
 if "location_name" not in st.session_state:
     st.session_state.location_name = ""    
+if "size_name" not in st.session_state:
+    st.session_state.size_name = "M"       # 預設為 M
 if "last_detected_barcode" not in st.session_state:
     st.session_state.last_detected_barcode = "" 
 
@@ -100,18 +102,32 @@ if st.button("清空目前盤點計數 🔄"):
     st.session_state.total_count = 0
     st.session_state.product_name = ""
     st.session_state.location_name = ""
+    st.session_state.size_name = "M"
     st.session_state.last_detected_barcode = ""
     st.rerun()
 
-# 2. 商品資訊與位置輸入
+# 2. 商品資訊、尺寸與位置輸入
 st.subheader("第二步：確認資料並同步至雲端")
 st.session_state.product_name = st.text_input("商品名稱", value=st.session_state.product_name)
+
+# 💥 核心優化：將尺寸改為快速下拉選單
+size_options = ["SS", "S", "M", "L", "XL", "XXL", "手動輸入其他尺寸..."]
+# 確保原本儲存的尺寸如果在選項中，能正確對齊索引
+default_idx = size_options.index(st.session_state.size_name) if st.session_state.size_name in size_options else 2
+
+selected_size = st.selectbox("商品尺寸 (Size)", options=size_options, index=default_idx)
+
+if selected_size == "手動輸入其他尺寸...":
+    st.session_state.size_name = st.text_input("請輸入自訂尺寸 / 規格", value="")
+else:
+    st.session_state.size_name = selected_size
+
 st.session_state.location_name = st.text_input("儲存位置 (例如：A區、3號架、Office)", value=st.session_state.location_name)
 
 # 3. 提交入庫按鈕
 if st.button("確認總數並送出入庫 📥", type="primary"):
-    if not st.session_state.current_barcode or not st.session_state.product_name or not st.session_state.location_name:
-        st.error("❌ 請確保有條碼、品名和位置！")
+    if not st.session_state.current_barcode or not st.session_state.product_name or not st.session_state.location_name or not st.session_state.size_name:
+        st.error("❌ 請確保有條碼、品名、尺寸和儲存位置！")
     elif st.session_state.total_count == 0:
         st.error("❌ 目前累計數量為 0！")
     else:
@@ -134,61 +150,61 @@ if st.button("確認總數並送出入庫 📥", type="primary"):
             except Exception:
                 pass
             
-            # 2. 💥 修正後的庫存智能整合邏輯（精準比對 SKU 與 儲存位置 欄位）
+            # 2. 庫存智能整合邏輯（精準比對 SKU + 尺寸 + 儲存位置 三個欄位）
             all_rows = inventory_sheet.get_all_values()
             match_row_index = None
             
             for idx, row in enumerate(all_rows[1:], start=2):
-                if len(row) >= 4:
-                    # 💥 精準提取第 1 欄 (SKU) 與第 4 欄 (儲存位置)，去掉前後空白再進行對比
+                if len(row) >= 5:
                     sheet_sku = str(row[0]).strip()
-                    sheet_location = str(row[3]).strip()
+                    sheet_size = str(row[2]).strip()       # Excel 的第 3 欄
+                    sheet_location = str(row[3]).strip()   # Excel 的第 4 欄
+                    
                     current_sku = str(st.session_state.current_barcode).strip()
+                    current_size = str(st.session_state.size_name).strip()
                     current_location = str(st.session_state.location_name).strip()
                     
-                    if sheet_sku == current_sku and sheet_location == current_location:
+                    if sheet_sku == current_sku and sheet_size == current_size and sheet_location == current_location:
                         match_row_index = idx
                         break
             
             if match_row_index:
-                # 💥 成功抓到相同紀錄！讀取舊數量並進行安全數值轉換
                 try:
-                    old_qty = int(all_rows[match_row_index-1][2])
+                    old_qty = int(all_rows[match_row_index-1][1]) 
                 except (ValueError, IndexError):
                     old_qty = 0
                     
                 new_qty = old_qty + int(st.session_state.total_count)
                 
-                # 更新該行的欄位資料
-                inventory_sheet.update_cell(match_row_index, 2, st.session_state.product_name) # 更新品名
-                inventory_sheet.update_cell(match_row_index, 3, new_qty)                      # 更新累加後的總數量
-                inventory_sheet.update_cell(match_row_index, 5, date_str)                     # 更新最新的日期
-                inventory_sheet.update_cell(match_row_index, 6, time_str)                     # 更新最新的時間
-                st.success(f"🔄 雲端已存在相同紀錄！已成功將數量由 {old_qty} 件累加更新為 **{new_qty}** 件！")
+                inventory_sheet.update_cell(match_row_index, 2, new_qty)                      
+                inventory_sheet.update_cell(match_row_index, 5, date_str)                     
+                inventory_sheet.update_cell(match_row_index, 6, time_str)                     
+                st.success(f"🔄 雲端已存在完全符合的紀錄！已將【{st.session_state.size_name}】的數量累加為 **{new_qty}** 件！")
             else:
-                # 雲端沒有完全相同的紀錄，直接追加新行
                 inventory_sheet.append_row([
                     str(st.session_state.current_barcode), 
-                    st.session_state.product_name, 
-                    int(st.session_state.total_count),
+                    str(st.session_state.total_count),
+                    str(st.session_state.product_name), 
+                    str(st.session_state.size_name),
                     st.session_state.location_name,
                     date_str,
                     time_str
                 ])
-                st.success(f"🎉 成功！新紀錄【{st.session_state.product_name}】已同步至雲端！")
+                st.success(f"🎉 成功！新規格【{st.session_state.product_name} - {st.session_state.size_name}】已同步至雲端！")
             
             # 上傳成功後自動清空
             st.session_state.current_barcode = ""
             st.session_state.total_count = 0
             st.session_state.product_name = ""
             st.session_state.location_name = ""
+            st.session_state.size_name = "M"
             st.session_state.last_detected_barcode = ""
             st.rerun()
 
 # 4. 實時顯示雲端庫存
 st.subheader("📊 目前雲端最新庫存總覽")
 try:
-    all_records = inventory_sheet.get_all_records(expected_headers=['商品編號(SKU)', '商品名稱', '數量', '儲存位置', '入庫日期', '入庫時間'])
+    all_records = inventory_sheet.get_all_records(expected_headers=['商品編號(SKU)', '數量', '商品名稱', '儲存位置', '入庫日期', '入庫時間'])
     if all_records:
         st.dataframe(all_records, use_container_width=True)
 except Exception as e:
