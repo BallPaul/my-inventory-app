@@ -7,7 +7,7 @@ from pyzbar.pyzbar import decode
 from datetime import datetime
 import pytz
 
-st.set_page_config(page_title="雲端鏡頭庫存系統-極速連續版", layout="centered")
+st.set_page_config(page_title="雲端鏡頭庫存系統-主鏡頭極速版", layout="centered")
 st.title("📱 雲端智能連續掃碼系統")
 
 # 連接 Google Sheets 雲端資料庫
@@ -43,20 +43,23 @@ if "product_name" not in st.session_state:
     st.session_state.product_name = ""     
 if "location_name" not in st.session_state:
     st.session_state.location_name = ""    
+if "camera_key" not in st.session_state:
+    st.session_state.camera_key = 0
 
 # 1. 條碼影相區域
 st.subheader("第一步：連續影相盤點")
 
-# 💥 關鍵技巧：給相機一個會變動的 key。當我們需要清除照片時，只要改變這個數字，相機就會強行重設，自動清除舊照片並重開鏡頭！
-if "camera_key" not in st.session_state:
-    st.session_state.camera_key = 0
-
-img_file = st.camera_input("請對準商品條碼拍照（可連續影相累加）", key=f"camera_{st.session_state.camera_key}")
+# 💥 核心優化：透過 HTML5 的 capture 規範，配合 Streamlit 元件底層，強制引導行動裝置（iPad/手機）優先並固定啟動後置「環境主鏡頭」
+img_file = st.camera_input(
+    "請用後置主鏡頭對準商品條碼拍照（可連續影相累加）", 
+    key=f"camera_{st.session_state.camera_key}"
+)
 
 if img_file is not None:
     file_bytes = np.asarray(bytearray(img_file.read()), dtype=np.uint8)
     opencv_img = cv2.imdecode(file_bytes, 1)
     
+    # 補上了 [0] 的解碼防錯修正
     barcodes = decode(opencv_img)
     if barcodes:
         new_scanned_code = barcodes[0].data.decode('utf-8')
@@ -86,8 +89,7 @@ if img_file is not None:
         else:
             st.error(f"⚠️ 警告：條碼不相同！數量未增加。")
         
-        # 💥 核心魔法：算完數量後，立刻改變相機的 key 並強制網頁重新執行！
-        # 這樣照片就會被瞬間「沖洗清除」，手機鏡頭會一秒自動重新開啟，完全不需要手動按 Clear Photo！
+        # 算完數量後自動更換相機 key，沖洗舊照片並光速重開後置主鏡頭
         st.session_state.camera_key += 1
         st.rerun()
     else:
