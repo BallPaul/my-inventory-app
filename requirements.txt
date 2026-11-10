@@ -5,3 +5,4 @@ pyzbar
 opencv-python-headless
 numpy
 pytz
+streamlit-camera-input-live
