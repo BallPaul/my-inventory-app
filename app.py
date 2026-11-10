@@ -7,7 +7,7 @@ from pyzbar.pyzbar import decode
 from datetime import datetime
 import pytz
 
-st.set_page_config(page_title="雲端鏡頭庫存系統-尺寸倉位版", layout="centered")
+st.set_page_config(page_title="雲端鏡頭庫存系統-完整對齊版", layout="centered")
 st.title("📱 雲端連續掃碼盤點系統")
 
 # 連接 Google Sheets 雲端資料庫
@@ -58,7 +58,7 @@ if img_file is not None:
     
     barcodes = decode(opencv_img)
     if barcodes:
-        st.session_state.last_detected_barcode = barcodes.data.decode('utf-8')
+        st.session_state.last_detected_barcode = barcodes.data[0].decode('utf-8')
         st.success(f"📷 偵測到條碼：{st.session_state.last_detected_barcode}（請點擊下方按鈕計數）")
     else:
         st.session_state.last_detected_barcode = ""
@@ -94,7 +94,7 @@ if st.session_state.last_detected_barcode:
             st.error(f"⚠️ 警告：此條碼 ({new_code}) 與目前盤點中的條碼 ({st.session_state.current_barcode}) 不相同！")
 
 # 顯示目前的盤點進度
-st.info(f"📊 **目前盤點狀態**：\n* 鎖定條碼: `{st.session_state.current_barcode if st.session_state.current_barcode else '尚未開始'}`\n* 累計總數: `{st.session_state.total_count} 件`")
+st.info(f"📊 **目盤點狀態**：\n* 鎖定條碼: `{st.session_state.current_barcode if st.session_state.current_barcode else '尚未開始'}`\n* 累計總數: `{st.session_state.total_count} 件`")
 
 # 清除/重置按鈕
 if st.button("清空目前盤點計數 🔄"):
@@ -122,14 +122,15 @@ else:
 
 st.session_state.location_name = st.text_input("儲存位置 (例如：A區、3號架、Office)", value=st.session_state.location_name)
 
-# 3. 提交入庫按鈕 (配合你現有的 Google Sheets 欄位順序)
+# 3. 提交入庫按鈕 (完全對齊你的 7 欄 Excel)
 if st.button("確認總數並送出入庫 📥", type="primary"):
     if not st.session_state.current_barcode or not st.session_state.product_name or not st.session_state.location_name or not st.session_state.size_name:
         st.error("❌ 請確保有條碼、品名、尺寸和儲存位置！")
     elif st.session_state.total_count == 0:
         st.error("❌ 目前累計數量為 0！")
     else:
-        with st.spinner("正在檢查雲端並同步庫存..."):
+        with st.spinner("正在將數據及時間戳同步至 Google 雲端..."):
+            # 🕒 獲取精準香港當地時間
             local_tz = pytz.timezone('Asia/Hong_Kong')
             now_local = datetime.now(local_tz)
             date_str = now_local.strftime("%Y-%m-%d")
@@ -148,15 +149,15 @@ if st.button("確認總數並送出入庫 📥", type="primary"):
             except Exception:
                 pass
             
-            # 2. 🛠️ 智能整合邏輯（配合你相片中的順序：1=SKU, 2=品名, 3=數量, 4=尺寸, 5=位置）
+            # 2. 智能整合查重（比對 SKU + 尺寸 + 儲存位置）
             all_rows = inventory_sheet.get_all_values()
             match_row_index = None
             
             for idx, row in enumerate(all_rows[1:], start=2):
                 if len(row) >= 5:
-                    sheet_sku = str(row[0]).strip()       # 第 1 欄 SKU
-                    sheet_size = str(row[3]).strip()      # 第 4 欄 尺寸
-                    sheet_location = str(row[4]).strip()  # 第 5 欄 位置
+                    sheet_sku = str(row[0]).strip()       # A 欄 SKU
+                    sheet_size = str(row[3]).strip()      # D 欄 尺寸
+                    sheet_location = str(row[4]).strip()  # E 欄 位置
                     
                     current_sku = str(st.session_state.current_barcode).strip()
                     current_size = str(st.session_state.size_name).strip()
@@ -168,19 +169,20 @@ if st.button("確認總數並送出入庫 📥", type="primary"):
             
             if match_row_index:
                 try:
-                    old_qty = int(all_rows[match_row_index-1][2]) # 舊數量在第 3 欄
+                    old_qty = int(all_rows[match_row_index-1][2]) # C 欄舊數量
                 except (ValueError, IndexError):
                     old_qty = 0
                     
                 new_qty = old_qty + int(st.session_state.total_count)
                 
-                inventory_sheet.update_cell(match_row_index, 2, st.session_state.product_name) # 更新品名 (第2欄)
-                inventory_sheet.update_cell(match_row_index, 3, new_qty)                      # 更新數量 (第3欄)
-                inventory_sheet.update_cell(match_row_index, 6, date_str)                     # 更新日期 (第6欄)
-                inventory_sheet.update_cell(match_row_index, 7, time_str)                     # 更新時間 (第7欄)
-                st.success(f"🔄 雲端已存在相同紀錄！已將數量累加更新為 **{new_qty}** 件！")
+                # 智能更新對應格
+                inventory_sheet.update_cell(match_row_index, 2, st.session_state.product_name) # B: 品名
+                inventory_sheet.update_cell(match_row_index, 3, new_qty)                      # C: 數量
+                inventory_sheet.update_cell(match_row_index, 6, date_str)                     # F: 日期
+                inventory_sheet.update_cell(match_row_index, 7, time_str)                     # G: 時間
+                st.success(f"🔄 雲端紀錄已存在！【{st.session_state.product_name}】數量已更新為 **{new_qty}** 件！")
             else:
-                # 🛠️ 嚴格對齊你的 Excel 標題順序寫入數據
+                # 完全符合你的 7 欄 Excel 順序進行全新寫入
                 inventory_sheet.append_row([
                     str(st.session_state.current_barcode),  # A: 商品編號(SKU)
                     str(st.session_state.product_name),     # B: 商品名稱
@@ -190,7 +192,7 @@ if st.button("確認總數並送出入庫 📥", type="primary"):
                     date_str,                               # F: 入庫日期
                     time_str                                # G: 入庫時間
                 ])
-                st.success(f"🎉 成功！新商品規格已完美寫入對應的 Excel 欄位！")
+                st.success(f"🎉 成功！數據連同日期、時間已完美同步至雲端表格！")
             
             # 上傳成功後自動清空
             st.session_state.current_barcode = ""
@@ -204,7 +206,6 @@ if st.button("確認總數並送出入庫 📥", type="primary"):
 # 4. 實時顯示雲端庫存
 st.subheader("📊 目前雲端最新庫存總覽")
 try:
-    # 完美對齊你相片中的這 7 個標題順序讀取
     all_records = inventory_sheet.get_all_records(expected_headers=['商品編號(SKU)', '商品名稱', '數量', '尺寸', '儲存位置', '入庫日期', '入庫時間'])
     if all_records:
         st.dataframe(all_records, use_container_width=True)
