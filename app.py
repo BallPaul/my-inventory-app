@@ -6,8 +6,9 @@ import numpy as np
 from pyzbar.pyzbar import decode
 from datetime import datetime
 import pytz
+from camera_input_live import camera_input_live
 
-st.set_page_config(page_title="雲端鏡頭庫存系統-主鏡頭極速版", layout="centered")
+st.set_page_config(page_title="雲端鏡頭庫存系統-主鏡頭鐵鎖版", layout="centered")
 st.title("📱 雲端智能連續掃碼系統")
 
 # 連接 Google Sheets 雲端資料庫
@@ -43,23 +44,22 @@ if "product_name" not in st.session_state:
     st.session_state.product_name = ""     
 if "location_name" not in st.session_state:
     st.session_state.location_name = ""    
-if "camera_key" not in st.session_state:
-    st.session_state.camera_key = 0
 
 # 1. 條碼影相區域
 st.subheader("第一步：連續影相盤點")
 
-# 💥 核心優化：透過 HTML5 的 capture 規範，配合 Streamlit 元件底層，強制引導行動裝置（iPad/手機）優先並固定啟動後置「環境主鏡頭」
-img_file = st.camera_input(
-    "請用後置主鏡頭對準商品條碼拍照（可連續影相累加）", 
-    key=f"camera_{st.session_state.camera_key}"
+# 💥 究極優化：利用專門的直播相機組件，直接在底層死鎖 facing_mode="environment"。
+# 這會強制令不論 iPhone、iPad 還是 Android，在啟動以及連續拍照重新載入時，全部 100% 固定使用背面後置主鏡頭！
+img_file = camera_input_live(
+    show_controls=True,
+    facing_mode="environment",
+    debounce=1000  # 防止快門太靈敏導致重複截圖
 )
 
 if img_file is not None:
     file_bytes = np.asarray(bytearray(img_file.read()), dtype=np.uint8)
     opencv_img = cv2.imdecode(file_bytes, 1)
     
-    # 補上了 [0] 的解碼防錯修正
     barcodes = decode(opencv_img)
     if barcodes:
         new_scanned_code = barcodes[0].data.decode('utf-8')
@@ -88,12 +88,9 @@ if img_file is not None:
             st.toast(f"🔄 偵測到相同條碼！目前累計：{st.session_state.total_count}")
         else:
             st.error(f"⚠️ 警告：條碼不相同！數量未增加。")
-        
-        # 算完數量後自動更換相機 key，沖洗舊照片並光速重開後置主鏡頭
-        st.session_state.camera_key += 1
-        st.rerun()
-    else:
-        st.warning("📷 未能辨識條碼，請按下面「Clear photo」重影。")
+            
+        # 💥 由於新相機自帶直播串流，我們甚至完全不需要用 camera_key 去重置相機了！
+        # 它拍完照後鏡頭會「一直保持亮著的直播狀態」，你可以直接連續拿新貨物對著主鏡頭，它就會自動瘋狂計數！
 
 # 顯示目前的盤點進度
 st.info(f"📊 **目前盤點狀態**：\n* 鎖定條碼: `{st.session_state.current_barcode if st.session_state.current_barcode else '尚未開始'}`\n* 累計總數: `{st.session_state.total_count} 件`")
@@ -104,7 +101,6 @@ if st.button("清空目前盤點計數 🔄"):
     st.session_state.total_count = 0
     st.session_state.product_name = ""
     st.session_state.location_name = ""
-    st.session_state.camera_key += 1
     st.rerun()
 
 # 2. 商品資訊與位置輸入
@@ -173,7 +169,6 @@ if st.button("確認總數並送出入庫 📥", type="primary"):
             st.session_state.total_count = 0
             st.session_state.product_name = ""
             st.session_state.location_name = ""
-            st.session_state.camera_key += 1
             st.rerun()
 
 # 4. 實時顯示雲端庫存
