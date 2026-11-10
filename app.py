@@ -44,13 +44,10 @@ if "product_name" not in st.session_state:
 if "location_name" not in st.session_state:
     st.session_state.location_name = ""    
 if "last_detected_barcode" not in st.session_state:
-    st.session_state.last_detected_barcode = "" # 記錄當前照片解碼出來的條碼
+    st.session_state.last_detected_barcode = "" 
 
 # 1. 條碼影相區域
 st.subheader("第一步：連續影相盤點")
-
-# 💥 移除容易令相機重設的 camera_key，回復最穩定的官方相機。
-# 只要第一次手動切換到後置主鏡頭，由於網頁不再自動重整，它將會永遠死鎖在主鏡頭！
 img_file = st.camera_input("請用後置主鏡頭對準商品條碼拍照")
 
 if img_file is not None:
@@ -59,14 +56,13 @@ if img_file is not None:
     
     barcodes = decode(opencv_img)
     if barcodes:
-        # 精準鎖定第一個解碼到的條碼
         st.session_state.last_detected_barcode = barcodes[0].data.decode('utf-8')
         st.success(f"📷 偵測到條碼：{st.session_state.last_detected_barcode}（請點擊下方按鈕計數）")
     else:
         st.session_state.last_detected_barcode = ""
         st.warning("📷 未能辨識條碼，請調整距離或光線重新拍一張。")
 
-# 💥 新增「手動確認計數按鈕」：完全不重整網頁，點擊後直接在背後計數
+# 手動確認計數按鈕
 if st.session_state.last_detected_barcode:
     btn_label = f"計數此條碼 (+1) 📥"
     if st.button(btn_label, use_container_width=True):
@@ -130,7 +126,7 @@ if st.button("確認總數並送出入庫 📥", type="primary"):
                 catalog_rows = catalog_sheet.get_all_values()
                 is_new_sku = True
                 for row in catalog_rows[1:]:
-                    if len(row) >= 1 and str(row).strip() == str(st.session_state.current_barcode).strip():
+                    if len(row) >= 1 and str(row[0]).strip() == str(st.session_state.current_barcode).strip():
                         is_new_sku = False
                         break
                 if is_new_sku:
@@ -138,26 +134,39 @@ if st.button("確認總數並送出入庫 📥", type="primary"):
             except Exception:
                 pass
             
-            # 2. 庫存智能整合邏輯
+            # 2. 💥 修正後的庫存智能整合邏輯（精準比對 SKU 與 儲存位置 欄位）
             all_rows = inventory_sheet.get_all_values()
             match_row_index = None
             
             for idx, row in enumerate(all_rows[1:], start=2):
                 if len(row) >= 4:
-                    if str(row).strip() == str(st.session_state.current_barcode).strip() and str(row).strip() == str(st.session_state.location_name).strip():
+                    # 💥 精準提取第 1 欄 (SKU) 與第 4 欄 (儲存位置)，去掉前後空白再進行對比
+                    sheet_sku = str(row[0]).strip()
+                    sheet_location = str(row[3]).strip()
+                    current_sku = str(st.session_state.current_barcode).strip()
+                    current_location = str(st.session_state.location_name).strip()
+                    
+                    if sheet_sku == current_sku and sheet_location == current_location:
                         match_row_index = idx
                         break
             
             if match_row_index:
-                old_qty = int(all_rows[match_row_index-1])
+                # 💥 成功抓到相同紀錄！讀取舊數量並進行安全數值轉換
+                try:
+                    old_qty = int(all_rows[match_row_index-1][2])
+                except (ValueError, IndexError):
+                    old_qty = 0
+                    
                 new_qty = old_qty + int(st.session_state.total_count)
                 
-                inventory_sheet.update_cell(match_row_index, 2, st.session_state.product_name)
-                inventory_sheet.update_cell(match_row_index, 3, new_qty)                      
-                inventory_sheet.update_cell(match_row_index, 5, date_str)                     
-                inventory_sheet.update_cell(match_row_index, 6, time_str)                     
-                st.success(f"🔄 數量已成功累加更新為 **{new_qty}** 件！")
+                # 更新該行的欄位資料
+                inventory_sheet.update_cell(match_row_index, 2, st.session_state.product_name) # 更新品名
+                inventory_sheet.update_cell(match_row_index, 3, new_qty)                      # 更新累加後的總數量
+                inventory_sheet.update_cell(match_row_index, 5, date_str)                     # 更新最新的日期
+                inventory_sheet.update_cell(match_row_index, 6, time_str)                     # 更新最新的時間
+                st.success(f"🔄 雲端已存在相同紀錄！已成功將數量由 {old_qty} 件累加更新為 **{new_qty}** 件！")
             else:
+                # 雲端沒有完全相同的紀錄，直接追加新行
                 inventory_sheet.append_row([
                     str(st.session_state.current_barcode), 
                     st.session_state.product_name, 
