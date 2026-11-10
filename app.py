@@ -7,8 +7,8 @@ from pyzbar.pyzbar import decode
 from datetime import datetime
 import pytz
 
-st.set_page_config(page_title="雲端鏡頭庫存系統-官方穩定版", layout="centered")
-st.title("📱 雲端智能連續掃碼系統")
+st.set_page_config(page_title="雲端鏡頭庫存系統-主鏡頭固定版", layout="centered")
+st.title("📱 雲端連續掃碼盤點系統")
 
 # 連接 Google Sheets 雲端資料庫
 @st.cache_resource
@@ -43,58 +43,57 @@ if "product_name" not in st.session_state:
     st.session_state.product_name = ""     
 if "location_name" not in st.session_state:
     st.session_state.location_name = ""    
-if "camera_key" not in st.session_state:
-    st.session_state.camera_key = 0
+if "last_detected_barcode" not in st.session_state:
+    st.session_state.last_detected_barcode = "" # 記錄當前照片解碼出來的條碼
 
 # 1. 條碼影相區域
 st.subheader("第一步：連續影相盤點")
 
-# 💥 使用最穩定的官方相機，配合自動遞增的 key 來達成免按 Clear photo 的功能
-img_file = st.camera_input(
-    "請對準商品條碼拍照（可連續影相累加）", 
-    key=f"st_camera_{st.session_state.camera_key}"
-)
+# 💥 移除容易令相機重設的 camera_key，回復最穩定的官方相機。
+# 只要第一次手動切換到後置主鏡頭，由於網頁不再自動重整，它將會永遠死鎖在主鏡頭！
+img_file = st.camera_input("請用後置主鏡頭對準商品條碼拍照")
 
 if img_file is not None:
     file_bytes = np.asarray(bytearray(img_file.read()), dtype=np.uint8)
     opencv_img = cv2.imdecode(file_bytes, 1)
     
-    # 這裡已經完美保留了 的解碼修正
     barcodes = decode(opencv_img)
     if barcodes:
-        new_scanned_code = barcodes[0].data.decode('utf-8')
+        # 精準鎖定第一個解碼到的條碼
+        st.session_state.last_detected_barcode = barcodes[0].data.decode('utf-8')
+        st.success(f"📷 偵測到條碼：{st.session_state.last_detected_barcode}（請點擊下方按鈕計數）")
+    else:
+        st.session_state.last_detected_barcode = ""
+        st.warning("📷 未能辨識條碼，請調整距離或光線重新拍一張。")
+
+# 💥 新增「手動確認計數按鈕」：完全不重整網頁，點擊後直接在背後計數
+if st.session_state.last_detected_barcode:
+    btn_label = f"計數此條碼 (+1) 📥"
+    if st.button(btn_label, use_container_width=True):
+        new_code = st.session_state.last_detected_barcode
         
-        # 判斷是不是同一個 Barcode
         if st.session_state.current_barcode == "":
-            st.session_state.current_barcode = new_scanned_code
+            st.session_state.current_barcode = new_code
             st.session_state.total_count = 1
-            st.toast(f"🎯 鎖定新條碼：{new_scanned_code}")
+            st.toast(f"🎯 鎖定新條碼：{new_code}")
             
             # 智能查名冊
             try:
                 catalog_data = catalog_sheet.get_all_records()
                 found_name = ""
                 for item in catalog_data:
-                    if str(item.get("商品編號(SKU)")).strip() == str(new_scanned_code).strip():
+                    if str(item.get("商品編號(SKU)")).strip() == str(new_code).strip():
                         found_name = item.get("商品名稱", "")
                         break
                 if found_name:
                     st.session_state.product_name = found_name
             except Exception:
                 pass
-                
-        elif st.session_state.current_barcode == new_scanned_code:
+        elif st.session_state.current_barcode == new_code:
             st.session_state.total_count += 1
-            st.toast(f"🔄 偵測到相同條碼！目前累計：{st.session_state.total_count}")
+            st.toast(f"🔄 數量已累計：{st.session_state.total_count} 件")
         else:
-            st.error(f"⚠️ 警告：條碼不相同！數量未增加。")
-        
-        # 💥 核心重置魔法：辨識完畢後，立刻讓 key 加 1 並強行 Rerun。
-        # 這樣舊照片會被瞬間抹除，鏡頭會一秒重開。因為使用的是官方原生元件，瀏覽器會直接沿用你剛剛選好的「後置主鏡頭」，不會再跳去自拍鏡頭了！
-        st.session_state.camera_key += 1
-        st.rerun()
-    else:
-        st.warning("📷 未能辨識條碼，請按下面「Clear photo」重影。")
+            st.error(f"⚠️ 警告：此條碼 ({new_code}) 與目前盤點中的條碼 ({st.session_state.current_barcode}) 不相同！")
 
 # 顯示目前的盤點進度
 st.info(f"📊 **目前盤點狀態**：\n* 鎖定條碼: `{st.session_state.current_barcode if st.session_state.current_barcode else '尚未開始'}`\n* 累計總數: `{st.session_state.total_count} 件`")
@@ -105,7 +104,7 @@ if st.button("清空目前盤點計數 🔄"):
     st.session_state.total_count = 0
     st.session_state.product_name = ""
     st.session_state.location_name = ""
-    st.session_state.camera_key += 1
+    st.session_state.last_detected_barcode = ""
     st.rerun()
 
 # 2. 商品資訊與位置輸入
@@ -174,7 +173,7 @@ if st.button("確認總數並送出入庫 📥", type="primary"):
             st.session_state.total_count = 0
             st.session_state.product_name = ""
             st.session_state.location_name = ""
-            st.session_state.camera_key += 1
+            st.session_state.last_detected_barcode = ""
             st.rerun()
 
 # 4. 實時顯示雲端庫存
