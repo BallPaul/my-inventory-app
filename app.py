@@ -51,7 +51,7 @@ st.subheader("第一步：連續影相盤點")
 # 💥 究極優化：利用專門的直播相機組件，直接在底層死鎖 facing_mode="environment"。
 # 這會強制令不論 iPhone、iPad 還是 Android，在啟動以及連續拍照重新載入時，全部 100% 固定使用背面後置主鏡頭！
 img_file = camera_input_live(
-    show_controls=True,
+    controls=True,
     initial_facing_mode="environment",
     debounce=1000  # 防止快門太靈敏導致重複截圖
 )
